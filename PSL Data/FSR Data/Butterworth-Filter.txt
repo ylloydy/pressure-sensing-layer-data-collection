@@ -1,0 +1,70 @@
+clear; close all; clc;
+
+%% --- Load CSV File ---
+[file, path] = uigetfile('*.csv');
+if isequal(file,0)
+    error('User pressed cancel.');
+end
+
+data = readtable(fullfile(path, file));
+
+%% --- Assign variable names (CSV has no header row) ---
+data.Properties.VariableNames = {'timestamp', 'force'};
+
+t = data.timestamp;
+f = data.force;
+
+%% --- Fix timestamps automatically (seconds or milliseconds) ---
+% If timestamps are too large (e.g., > 10,000), treat as milliseconds
+if max(t) > 10000
+    t = t / 1000;   % convert ms → seconds
+    disp('Timestamps converted from ms to seconds.');
+end
+
+%% --- OPTIONAL: Remove outliers ---
+f_noout = medfilt1(f, 5);
+
+%% --- Estimate sampling frequency ---
+dt = diff(t);
+
+% Fix zeros in dt (duplicate timestamps)
+dt(dt == 0) = []; 
+
+Fs = 1 / mean(dt);   % sampling frequency
+
+disp(['Estimated Sampling Frequency Fs = ', num2str(Fs), ' Hz']);
+
+%% --- Low-pass Butterworth Filter (Auto-safeguarded) ---
+Fc = 5;  % desired cutoff frequency in Hz
+
+% If Fc > Nyquist, reduce it automatically
+Nyquist = Fs / 2;
+if Fc >= Nyquist
+    Fc = Nyquist * 0.5;   % set cutoff to 50% of Nyquist
+    disp(['Cutoff frequency automatically reduced to ', num2str(Fc), ' Hz']);
+end
+
+% Compute normalized cutoff Wn safely
+Wn = Fc / Nyquist;
+
+% Keep Wn strictly inside (0, 1)
+Wn = min(max(Wn, 0.001), 0.999);
+
+% Final filter design
+[b,a] = butter(4, Wn, 'low');
+f_filt = filtfilt(b, a, f_noout);
+
+%% --- Moving Average (optional extra smoothing) ---
+windowSize = 15;
+f_smooth = movmean(f_noout, windowSize);
+
+%% --- Plot Results ---
+figure;
+plot(t, f, 'Color', [0.6 0.6 0.6]); hold on;
+plot(t, f_smooth, 'b', 'LineWidth', 1.5);
+plot(t, f_filt, 'r', 'LineWidth', 1.5);
+legend('Raw', 'Moving Average', 'Butterworth Filter');
+xlabel('Time (s)');
+ylabel('Force Value');
+title('FSR406 - Cleaned Signal');
+grid on;
